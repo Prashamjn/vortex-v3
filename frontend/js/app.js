@@ -1,11 +1,11 @@
 /**
  * VORTEX v3 — app.js
  * ──────────────────────────────────────────────────────────────────
- * Handles token auth transparently:
- *   - On first load, calls /api/health
- *   - If 401 → shows token input modal
- *   - Token saved in sessionStorage (cleared when tab closes)
- *   - All /api/info and /api/stream calls include the token
+ * Auth flow:
+ *  1. Page loads → checkHealth()
+ *  2. If 401 → show token modal, block all other API calls
+ *  3. User enters token → verified → saved → app unlocked
+ *  4. All subsequent API calls include token header automatically
  * ──────────────────────────────────────────────────────────────────
  */
 
@@ -15,12 +15,14 @@ const API = `${window.location.protocol}//${window.location.host}/api`;
 
 // ── State ──────────────────────────────────────────────────────────
 const S = {
-  format:     'mp4',
-  quality:    '720p',
-  videoData:  null,
-  isFetching: false,
-  token:      sessionStorage.getItem('vx-token') || '',
-  theme:      localStorage.getItem('vx-theme')   || 'dark',
+  format:      'mp4',
+  quality:     '720p',
+  videoData:   null,
+  isFetching:  false,
+  // Locked = waiting for token. Starts locked if no saved token.
+  locked:      true,
+  token:       sessionStorage.getItem('vx-token') || '',
+  theme:       localStorage.getItem('vx-theme')   || 'dark',
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────
@@ -54,7 +56,6 @@ const sDot         = $id('sDot');
 const sText        = $id('sText');
 const themeBtn     = $id('themeBtn');
 const toastStack   = $id('toastStack');
-// Token modal
 const tokenModal   = $id('tokenModal');
 const tokenInput   = $id('tokenInput');
 const tokenSubmit  = $id('tokenSubmit');
@@ -69,9 +70,11 @@ function applyTheme(t) {
   S.theme = t;
 }
 applyTheme(S.theme);
-themeBtn.addEventListener('click', () => applyTheme(S.theme === 'dark' ? 'light' : 'dark'));
+themeBtn.addEventListener('click', () =>
+  applyTheme(S.theme === 'dark' ? 'light' : 'dark')
+);
 
-// ── Fetch helper — always injects token header ─────────────────────
+// ── API fetch helper — injects token header on every call ──────────
 function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (S.token) headers['x-vortex-token'] = S.token;
@@ -80,29 +83,57 @@ function apiFetch(path, opts = {}) {
 
 // ── Token modal ────────────────────────────────────────────────────
 function showTokenModal(errMsg = '') {
+  S.locked = true;
   tokenModal.classList.remove('hidden');
-  tokenInput.focus();
   tokenError.textContent = errMsg;
+  // Small delay so modal renders before focusing
+  setTimeout(() => tokenInput.focus(), 50);
 }
 
 function hideTokenModal() {
+  S.locked = false;
   tokenModal.classList.add('hidden');
   tokenError.textContent = '';
+  tokenInput.value = '';
 }
 
+// Unlock button click
 tokenSubmit.addEventListener('click', async () => {
   const t = tokenInput.value.trim();
-  if (!t) { tokenError.textContent = 'Please enter the access token.'; return; }
-  // Test the token against health endpoint
-  const r = await fetch(`${API}/health`, { headers: { 'x-vortex-token': t } });
-  if (r.status === 401) {
-    tokenError.textContent = 'Wrong token. Try again.';
+  if (!t) {
+    tokenError.textContent = 'Please enter the access token.';
     return;
   }
-  S.token = t;
-  sessionStorage.setItem('vx-token', t);
-  hideTokenModal();
-  await checkHealth();
+
+  tokenSubmit.disabled = true;
+  tokenSubmit.textContent = 'Checking…';
+
+  try {
+    const r = await fetch(`${API}/health`, {
+      headers: { 'x-vortex-token': t },
+    });
+
+    if (r.status === 401) {
+      tokenError.textContent = 'Wrong token — try again.';
+      tokenSubmit.disabled = false;
+      tokenSubmit.textContent = 'Unlock →';
+      tokenInput.select();
+      return;
+    }
+
+    // Token accepted
+    S.token = t;
+    sessionStorage.setItem('vx-token', t);
+    tokenSubmit.disabled = false;
+    tokenSubmit.textContent = 'Unlock →';
+    hideTokenModal();
+    checkHealth();
+
+  } catch {
+    tokenError.textContent = 'Could not reach server. Is it running?';
+    tokenSubmit.disabled = false;
+    tokenSubmit.textContent = 'Unlock →';
+  }
 });
 
 tokenInput.addEventListener('keydown', e => {
@@ -113,25 +144,42 @@ tokenInput.addEventListener('keydown', e => {
 async function checkHealth() {
   try {
     const r = await apiFetch('/health');
-    if (r.status === 401) { showTokenModal(); return; }
+
+    // Server requires a token and we don't have one (or it's wrong)
+    if (r.status === 401) {
+      showTokenModal();
+      setStatus('error', 'Token required');
+      return;
+    }
+
+    // Mark as unlocked — safe to make other API calls now
+    S.locked = false;
+
     const d = await r.json();
+
     if (d.dependencies?.ytdlp && d.dependencies?.ffmpeg) {
       setStatus('online', 'Ready');
     } else if (!d.dependencies?.ytdlp) {
       setStatus('error', 'yt-dlp missing');
-      showToast('yt-dlp not installed on server. Run: pip install yt-dlp', 'error', 9000);
+      showToast(
+        'yt-dlp is not installed on the server. Redeploy to fix.',
+        'error', 10000
+      );
     } else {
       setStatus('warn', 'ffmpeg missing');
-      showToast('ffmpeg missing on server. MP3 / 1080p merging may fail.', 'error', 7000);
+      showToast(
+        'ffmpeg not found on server. MP3 conversion may fail.',
+        'error', 8000
+      );
     }
   } catch {
     setStatus('error', 'Offline');
-    showToast('Cannot reach backend. Is the server running?', 'error');
+    showToast('Cannot reach server. Is it running?', 'error');
   }
 }
 
 function setStatus(cls, txt) {
-  sDot.className  = `s-dot ${cls}`;
+  sDot.className    = `s-dot ${cls}`;
   sText.textContent = txt;
 }
 
@@ -140,38 +188,67 @@ function isYT(url) {
   return /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/.test(url);
 }
 
-// ── Paste ──────────────────────────────────────────────────────────
+// ── Paste button ───────────────────────────────────────────────────
 pasteBtn.addEventListener('click', async () => {
+  if (S.locked) return;
   try {
     const t = await navigator.clipboard.readText();
     urlInput.value = t.trim();
     pasteBtn.style.color = 'var(--blue)';
     setTimeout(() => (pasteBtn.style.color = ''), 600);
     if (isYT(urlInput.value)) fetchInfo();
-  } catch { showToast('Clipboard denied — paste manually (Ctrl+V)', 'info'); }
+  } catch {
+    showToast('Clipboard denied — paste manually (Ctrl+V)', 'info');
+  }
 });
 
-// Drag and drop URL
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dz-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dz-over'));
+// Drag and drop
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  if (!S.locked) dropZone.classList.add('dz-over');
+});
+dropZone.addEventListener('dragleave', () =>
+  dropZone.classList.remove('dz-over')
+);
 dropZone.addEventListener('drop', e => {
-  e.preventDefault(); dropZone.classList.remove('dz-over');
-  const t = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-  if (t) { urlInput.value = t.trim(); if (isYT(t)) fetchInfo(); }
+  e.preventDefault();
+  dropZone.classList.remove('dz-over');
+  if (S.locked) return;
+  const t =
+    e.dataTransfer.getData('text/plain') ||
+    e.dataTransfer.getData('text/uri-list');
+  if (t) {
+    urlInput.value = t.trim();
+    if (isYT(t)) fetchInfo();
+  }
 });
 
-// Auto-fetch on paste
+// Auto-fetch on paste — ONLY if not locked
 urlInput.addEventListener('paste', () => {
-  setTimeout(() => { if (isYT(urlInput.value.trim())) fetchInfo(); }, 80);
+  setTimeout(() => {
+    if (!S.locked && isYT(urlInput.value.trim())) fetchInfo();
+  }, 80);
 });
-urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') fetchInfo(); });
-fetchBtn.addEventListener('click', fetchInfo);
+
+urlInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !S.locked) fetchInfo();
+});
+
+fetchBtn.addEventListener('click', () => {
+  if (!S.locked) fetchInfo();
+});
 
 // ── Fetch video info ───────────────────────────────────────────────
 async function fetchInfo() {
+  if (S.locked) {
+    showToast('Enter the access token first.', 'info');
+    showTokenModal();
+    return;
+  }
+
   const url = urlInput.value.trim();
-  if (!url)      { showToast('Paste a YouTube URL first.', 'info');            return; }
-  if (!isYT(url)){ showToast("That doesn't look like a YouTube URL.", 'error'); return; }
+  if (!url)       { showToast('Paste a YouTube URL first.', 'info');             return; }
+  if (!isYT(url)) { showToast("That doesn't look like a YouTube URL.", 'error'); return; }
   if (S.isFetching) return;
 
   S.isFetching = true;
@@ -184,14 +261,16 @@ async function fetchInfo() {
   controls.classList.add('hidden');
 
   try {
-    const res  = await apiFetch('/info', {
+    const res = await apiFetch('/info', {
       method: 'POST',
       body:   JSON.stringify({ url }),
     });
 
+    // Token expired mid-session
     if (res.status === 401) {
-      showTokenModal('Session expired. Enter token again.');
-      goBackToInput(); return;
+      showTokenModal('Session expired. Re-enter your token.');
+      goBackToInput();
+      return;
     }
 
     const data = await res.json();
@@ -202,11 +281,14 @@ async function fetchInfo() {
     vThumb.src         = data.thumbnail || '';
     vDur.textContent   = data.duration  || '—';
     vTitle.textContent = data.title     || '—';
-    vChannel.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${esc(data.channel)}`;
+    vChannel.innerHTML =
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">` +
+      `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ` +
+      esc(data.channel);
     vViews.textContent = `👁 ${data.viewCount} views`;
     cacheChip.classList.toggle('hidden', !data.fromCache);
 
-    updateQualityBtns(data.availableQualities || ['360p','720p','1080p']);
+    updateQualityBtns(data.availableQualities || ['360p', '720p', '1080p']);
     updateDownloadHref();
 
     skeleton.style.display = 'none';
@@ -224,8 +306,8 @@ async function fetchInfo() {
 
 function setFetchLoading(on) {
   fetchBtn.classList.toggle('loading', on);
-  fetchBtn.disabled        = on;
-  fetchLabel.style.opacity  = on ? '0' : '1';
+  fetchBtn.disabled          = on;
+  fetchLabel.style.opacity   = on ? '0' : '1';
   fetchSpinner.style.opacity = on ? '1' : '0';
 }
 
@@ -235,7 +317,7 @@ function goBackToInput() {
   stepInput.classList.remove('hidden');
 }
 
-// ── Segment controls ───────────────────────────────────────────────
+// ── Format / Quality selectors ─────────────────────────────────────
 function bindSeg(el, key, onChange) {
   el.addEventListener('click', e => {
     const btn = e.target.closest('.seg-btn');
@@ -259,7 +341,7 @@ function updateQualityBtns(available) {
   });
   const cur = qualSeg.querySelector(`.seg-btn[data-val="${S.quality}"]`);
   if (cur?.disabled) {
-    for (const q of ['720p','1080p','360p']) {
+    for (const q of ['720p', '1080p', '360p']) {
       const b = qualSeg.querySelector(`.seg-btn[data-val="${q}"]`);
       if (b && !b.disabled) {
         qualSeg.querySelectorAll('.seg-btn').forEach(x => x.classList.remove('active'));
@@ -271,11 +353,7 @@ function updateQualityBtns(available) {
   }
 }
 
-/**
- * Build the stream URL and assign to the download anchor.
- * Token is included as a query param so it rides along with the
- * browser navigation (fetch headers can't be set on <a href> clicks).
- */
+// Build stream URL including token as query param
 function updateDownloadHref() {
   if (!S.videoData) return;
   const params = new URLSearchParams({
@@ -284,18 +362,18 @@ function updateDownloadHref() {
     quality: S.quality,
     title:   S.videoData.title || 'download',
   });
-  // Include token in query string for the stream request
   if (S.token) params.set('token', S.token);
   downloadBtn.href = `${API}/stream?${params}`;
 }
 
-// Show feedback when download starts
+// Show feedback message when download link is clicked
 downloadBtn.addEventListener('click', e => {
   if (!S.videoData) { e.preventDefault(); return; }
   dlFeedback.classList.remove('hidden');
   const fmt = S.format.toUpperCase();
   const q   = S.format === 'mp3' ? '' : ` · ${S.quality}`;
-  dlFbText.textContent = `Preparing ${fmt}${q} — your browser will prompt you to save the file.`;
+  dlFbText.textContent =
+    `Preparing ${fmt}${q} — your browser will prompt you to save the file.`;
   setTimeout(() => dlFeedback.classList.add('hidden'), 15000);
 });
 
@@ -314,11 +392,8 @@ resetBtn.addEventListener('click', () => {
 // ── Keyboard shortcuts ─────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-    urlInput.focus(); urlInput.select(); e.preventDefault();
-  }
-  if (e.key === 'Escape' && !tokenModal.classList.contains('hidden')) {
-    // Don't close modal on Escape if no token set — user must authenticate
-    if (S.token) hideTokenModal();
+    if (!S.locked) { urlInput.focus(); urlInput.select(); }
+    e.preventDefault();
   }
 });
 
@@ -351,4 +426,6 @@ function esc(s) {
 }
 
 // ── Init ───────────────────────────────────────────────────────────
+// checkHealth() will either unlock the app (no token needed / token in storage)
+// or show the token modal (401 response)
 checkHealth();

@@ -1,8 +1,18 @@
-# Dependencies
+# ── Node ──────────────────────────────────────────────────────────
 node_modules/
 backend/node_modules/
+npm-debug.log*
+yarn-error.log*
+.npm
 
-# Downloads (don't commit your downloaded files)
+# ── Environment (NEVER commit secrets) ───────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+backend/.env
+
+# ── Downloads / media (never commit downloaded files) ────────────
 downloads/
 *.mp4
 *.mp3
@@ -11,36 +21,30 @@ downloads/
 *.m4a
 *.wav
 *.flac
-*.jpg
-*.jpeg
-*.png
 *.srt
 *.vtt
 *.part
 *.ytdl
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.jpg.part
 
-# Environment
-.env
-.env.local
-.env.production
-
-# Logs
-*.log
-logs/
-
-# OS
+# ── OS files ──────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Editor
-.vscode/
-.idea/
 *.swp
 *.swo
 
-# Build
+# ── Editor ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── Build artifacts ───────────────────────────────────────────────
 dist/
 build/
-.env
-.env.local
+.cache/

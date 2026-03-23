@@ -29,15 +29,17 @@
       <div class="modal-icon">🔐</div>
       <h2 class="modal-title">Access Token Required</h2>
       <p class="modal-sub">This VORTEX instance is password-protected.<br/>Enter the token your server owner shared with you.</p>
-      <input
-        type="password"
-        id="tokenInput"
-        class="modal-input"
-        placeholder="Paste access token here…"
-        autocomplete="current-password"
-      />
-      <p class="modal-error" id="tokenError"></p>
-      <button class="btn-primary w-full" id="tokenSubmit">Unlock →</button>
+      <form id="tokenForm" onsubmit="return false;">
+        <input
+          type="password"
+          id="tokenInput"
+          class="modal-input"
+          placeholder="Paste access token here…"
+          autocomplete="current-password"
+        />
+        <p class="modal-error" id="tokenError"></p>
+        <button type="submit" class="btn-primary w-full" id="tokenSubmit">Unlock →</button>
+      </form>
     </div>
   </div>
 

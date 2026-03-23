@@ -86,16 +86,36 @@ const MIME = {
 
 /** GET /api/health */
 async function health(req, res) {
-  let ytdlp = false, ffmpeg = false, ytdlpVersion = null;
-  try { ytdlpVersion = await execAsync('yt-dlp --version'); ytdlp = true; } catch {}
-  try { await execAsync('ffmpeg -version'); ffmpeg = true; } catch {}
+  let ytdlp = false, ffmpeg = false, ytdlpVersion = null, ytdlpError = null;
+  let ffmpegVersion = null, ffmpegError = null;
+
+  try {
+    ytdlpVersion = await execAsync('yt-dlp --version');
+    ytdlp = true;
+  } catch (e) {
+    ytdlpError = e.message.slice(0, 120);
+  }
+
+  try {
+    const ffmpegOut = await execAsync('ffmpeg -version');
+    ffmpegVersion = ffmpegOut.split('\n')[0]; // first line only
+    ffmpeg = true;
+  } catch (e) {
+    ffmpegError = e.message.slice(0, 120);
+  }
+
   res.json({
-    status: 'ok',
+    status:  'ok',
     version: '3.0.0',
-    uptime: Math.round(process.uptime()),
-    dependencies: { ytdlp, ffmpeg, ytdlpVersion },
-    mode: 'stream',
+    uptime:  Math.round(process.uptime()),
+    dependencies: {
+      ytdlp,        ytdlpVersion,  ytdlpError,
+      ffmpeg,       ffmpegVersion, ffmpegError,
+    },
+    mode:  'stream',
     cache: infoCache.stats(),
+    node:  process.version,
+    platform: process.platform,
   });
 }
 
