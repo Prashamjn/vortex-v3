@@ -1,0 +1,16 @@
+{
+  "name": "vortex-v3",
+  "version": "3.0.0",
+  "description": "VORTEX v3 — Production-grade local YouTube downloader",
+  "scripts": {
+    "start":  "cd backend && node server.js",
+    "setup":  "cd backend && npm install",
+    "dev":    "cd backend && npm run dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/vortex"
+  },
+  "license": "MIT",
+  "engines": { "node": ">=18.0.0" }
+}

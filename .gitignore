@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+
+# Downloads (don't commit your downloaded files)
+downloads/
+*.mp4
+*.mp3
+*.mkv
+*.webm
+*.m4a
+*.wav
+*.flac
+*.jpg
+*.jpeg
+*.png
+*.srt
+*.vtt
+*.part
+*.ytdl
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build
+dist/
+build/
+.env
+.env.local
