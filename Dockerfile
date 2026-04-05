@@ -10,7 +10,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages -U "yt-dlp[default]"
+RUN pip3 install --upgrade pip && \
+    pip3 install -U "yt-dlp[default]"
 
 RUN yt-dlp --version && node --version && ffmpeg -version | head -1
 
