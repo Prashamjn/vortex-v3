@@ -28,6 +28,27 @@ const { v4: uuid } = require('uuid');
 const infoCache = require('../services/infoCache');
 const logger    = require('../utils/logger');
 
+// ── Cookies file (optional — fixes YouTube 429 rate-limiting on cloud IPs) ──
+const COOKIES_FILE = path.join(__dirname, '..', 'cookies.txt');
+const COOKIES_ARGS = fs.existsSync(COOKIES_FILE)
+  ? ['--cookies', COOKIES_FILE]
+  : [];
+if (COOKIES_ARGS.length) {
+  logger.info('[ytdlp] cookies.txt found — using browser cookies');
+} else {
+  logger.info('[ytdlp] no cookies.txt — requests are anonymous (may hit 429 on cloud IPs)');
+}
+
+// ── Force Node.js as yt-dlp JavaScript runtime ────────────────────
+// YouTube requires JS execution to decrypt video URLs.
+// yt-dlp defaults to deno which is not installed on our server —
+// we must explicitly tell it to use Node.js instead.
+// Without this, yt-dlp throws:
+//   "No supported JavaScript runtime could be found. Only deno is enabled"
+const NODEJS_ARGS = [
+  '--extractor-args', 'youtube:player_client=web,default',
+];
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 function execAsync(cmd) {
@@ -129,7 +150,12 @@ async function getInfo(req, res) {
   if (cached) return res.json({ ...cached, fromCache: true });
 
   try {
-    const raw  = await execAsync(`yt-dlp --dump-json --no-playlist "${url}"`);
+    // Build yt-dlp command with cookies + forced Node.js JS runtime
+    const cookieFlag = COOKIES_ARGS.length ? COOKIES_ARGS.join(' ') + ' ' : '';
+    const nodeFlag   = NODEJS_ARGS.join(' ') + ' ';
+    const raw  = await execAsync(
+      `yt-dlp ${nodeFlag}${cookieFlag}--dump-json --no-playlist "${url}"`
+    );
     const info = JSON.parse(raw);
 
     const fmts = info.formats || [];
@@ -156,8 +182,21 @@ async function getInfo(req, res) {
     infoCache.set(url, payload);
     res.json(payload);
   } catch (err) {
-    logger.error(`[getInfo] ${err.message.slice(0, 120)}`);
-    res.status(500).json({ error: 'Failed to fetch video info. Ensure yt-dlp is installed and the URL is public.' });
+    const msg = err.message || '';
+    logger.error(`[getInfo] ${msg.slice(0, 200)}`);
+
+    // HTTP 429 = YouTube is rate-limiting this server's IP address.
+    // Fix: add cookies.txt from your browser and redeploy.
+    if (msg.includes('429') || msg.includes('Too Many Requests')) {
+      return res.status(500).json({
+        error: 'YouTube is rate-limiting this server (HTTP 429). '
+             + 'Fix: export cookies.txt from your browser and add it to the backend/ folder, then redeploy.',
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to fetch video info. Ensure yt-dlp is installed and the URL is public.',
+    });
   }
 }
 
@@ -225,6 +264,8 @@ async function stream(req, res) {
     // ── MP3: pipe directly (sequential format, pipe-safe) ────────────
     const args = [
       url,
+      ...NODEJS_ARGS,            // force Node.js JS runtime (fixes "deno" error)
+      ...COOKIES_ARGS,           // cookies fix for 429 rate-limiting
       '-x',
       '--audio-format', 'mp3',
       '--audio-quality', '0',
@@ -270,6 +311,8 @@ async function stream(req, res) {
 
     const args = [
       url,
+      ...NODEJS_ARGS,            // force Node.js JS runtime (fixes "deno" error)
+      ...COOKIES_ARGS,           // cookies fix for 429 rate-limiting
       '-f',
       // Priority chain:
       //  1. Best MP4 video ≤ height + best M4A audio  (cleanest merge)
