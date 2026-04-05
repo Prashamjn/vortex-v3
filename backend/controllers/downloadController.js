@@ -46,7 +46,7 @@ if (COOKIES_ARGS.length) {
 // Without this, yt-dlp throws:
 //   "No supported JavaScript runtime could be found. Only deno is enabled"
 const NODEJS_ARGS = [
-  '--extractor-args', 'youtube:player_client=tv_embedded,mweb,default',
+  '--extractor-args', 'youtube:player_client=mweb,default',
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────
